@@ -34,10 +34,11 @@ int main(int argc, char ** argv)
     BigVector<float> pagerank[PRO_NUM];
     BigVector<float> sum[PRO_NUM];
     BigVector<VertexId> degree(graph.path+"/degree", graph.vertices);
+    degree.fill(0);
 
     long vertex_data_bytes = (long)graph.vertices * ( sizeof(VertexId)+ sizeof(float) + sizeof(float));
     graph.set_vertex_data_bytes(vertex_data_bytes);
-    degree.fill(0);
+    printf("Vertices: %d Edges: %ld\n", graph.vertices, graph.edges);
 
     VertexId active_vertices = 4;
     //sssp
@@ -52,13 +53,15 @@ int main(int argc, char ** argv)
 
         active_in_sssp[i] = graph.alloc_bitmap();
         active_out_sssp[i] = graph.alloc_bitmap();
-        depth[i].init(graph.path+"/depth"+std::to_string(i), graph.vertices);
         active_out_sssp[i]->clear();
         int start_sssp = 71 * (i+1) + 2;
+        if (start_sssp >= graph.vertices)
+            start_sssp = i + 1;
         active_out_sssp[i]->set_bit(start_sssp);
+        depth[i].init(graph.path + "/depth" + std::to_string(i), graph.vertices);
         depth[i].fill(MAX_DEPTH);
         depth[i][start_sssp] = 0;
-        active_out_sssp[i]->fill();
+        // active_out_sssp[i]->fill();
     }
     #pragma omp barrier
 
@@ -77,7 +80,8 @@ int main(int argc, char ** argv)
     printf("degree calculation used %.2f seconds\n", get_time() - begin_time);
     fflush(stdout);
 
-    graph.hint(pagerank[0], sum[0]);
+    for (int i = 0; i < PRO_NUM; ++i)
+        graph.hint(pagerank[i], sum[i]);
     graph.stream_vertices<VertexId>(
         [&](VertexId i)
     {
@@ -114,12 +118,20 @@ int main(int argc, char ** argv)
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_sssp);
 
-            std::swap(active_in_sssp[0], active_out_sssp[0]);
-            active_out_sssp[0]->clear();
-            graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[0]);
+            #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
+            for (int i = 0; i < PRO_NUM; ++i){
+                std::swap(active_in_sssp[i], active_out_sssp[i]);
+                active_out_sssp[i]->clear();
+                graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[i]);
+            }
 
             #pragma omp barrier
         }
+
+#ifdef DEBUG
+        for (int i = 0; i < PRO_NUM; ++i)
+            active_in_sssp[i]->print(10);
+#endif
 
         graph.get_global_should_access_shard(graph.should_access_shard_wcc, graph.should_access_shard_pagerank,
                                              graph.should_access_shard_bfs,graph.should_access_shard_sssp);
@@ -132,13 +144,16 @@ int main(int argc, char ** argv)
         }, [&](Edge & e){
             //SSSP
             int return_state = 0;
-            if(active_in_sssp[0] -> get_bit(e.source)){
-                for(int i = 0; i < PRO_NUM; i++){
+            for(int i = 0; i < PRO_NUM; i++){
+                if (active_in_sssp[i]->get_bit(e.source))
+                {
                     int r = depth[i][e.target];
-                    int n = depth[i][e.source]+ e.weight;
-                    if(n < r){
-                        if (cas(&depth[i][e.target], r, n)){
-                            active_out_sssp[0]->set_bit(e.target);
+                    int n = depth[i][e.source] + e.weight;
+                    if (n < r)
+                    {
+                        if (cas(&depth[i][e.target], r, n))
+                        {
+                            active_out_sssp[i]->set_bit(e.target);
                             return_state = 1;
                         }
                     }
@@ -164,7 +179,8 @@ int main(int argc, char ** argv)
         // }
         );
 
-        graph.hint(pagerank[0], sum[0]);
+        for (int i = 0; i < PRO_NUM; ++i)
+            graph.hint(pagerank[i], sum[i]);
         if (iter==iterations-1)
         {
             graph.stream_vertices<VertexId>(
