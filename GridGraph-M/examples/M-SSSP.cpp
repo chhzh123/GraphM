@@ -28,11 +28,12 @@ int main(int argc, char ** argv)
     double begin_time = get_time();
     Graph graph(path);
     graph.set_memory_bytes(memory_bytes);
+    printf("Vertices: %d Edges: %ld\n", graph.vertices, graph.edges);
 
     long vertex_data_bytes = (long)graph.vertices * ( sizeof(VertexId)+ sizeof(float) + sizeof(float));
     graph.set_vertex_data_bytes(vertex_data_bytes);
 
-    VertexId active_vertices = 8;
+    VertexId active_vertices = PRO_NUM;
     //sssp
     Bitmap * active_in_sssp[PRO_NUM];
     Bitmap * active_out_sssp[PRO_NUM];
@@ -45,10 +46,12 @@ int main(int argc, char ** argv)
         depth[i].init(graph.path+"/depth"+std::to_string(i), graph.vertices);
         active_out_sssp[i]->clear();
         int start_sssp = 211 * (i+1);
+        if (start_sssp >= graph.vertices)
+            start_sssp = i + 1;
         active_out_sssp[i]->set_bit(start_sssp);
         depth[i].fill(MAX_DEPTH);
         depth[i][start_sssp] = 0;
-        active_out_sssp[i]->fill();
+        // active_out_sssp[i]->fill();
     }
     #pragma omp barrier
 
@@ -61,10 +64,20 @@ int main(int argc, char ** argv)
 
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_sssp);
-            std::swap(active_in_sssp[0], active_out_sssp[0]);
-            active_out_sssp[0]->clear();
-            graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[0]);
+
+            #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
+            for (int i = 0; i < PRO_NUM; ++i){
+                std::swap(active_in_sssp[i], active_out_sssp[i]);
+                active_out_sssp[i]->clear();
+                graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[i]);
+            }
+            #pragma omp barrier
         }
+
+#ifdef DEBUG
+        for (int i = 0; i < PRO_NUM; ++i)
+            active_in_sssp[i]->print(10);
+#endif
 
         graph.get_global_should_access_shard(graph.should_access_shard_wcc, graph.should_access_shard_pagerank,
                                              graph.should_access_shard_bfs,graph.should_access_shard_sssp);
@@ -74,13 +87,16 @@ int main(int argc, char ** argv)
         }, [&](Edge & e){
             //SSSP
             int return_state = 0;
-            if(active_in_sssp[0] -> get_bit(e.source)){
-                for(int i = 0; i < PRO_NUM; i++){
+            for(int i = 0; i < PRO_NUM; i++){
+                if (active_in_sssp[i]->get_bit(e.source))
+                {
                     int r = depth[i][e.target];
-                    int n = depth[i][e.source]+ e.weight;
-                    if(n < r){
-                        if (cas(&depth[i][e.target], r, n)){
-                            active_out_sssp[0]->set_bit(e.target);
+                    int n = depth[i][e.source] + e.weight;
+                    if (n < r)
+                    {
+                        if (cas(&depth[i][e.target], r, n))
+                        {
+                            active_out_sssp[i]->set_bit(e.target);
                             return_state = 1;
                         }
                     }
@@ -94,16 +110,6 @@ int main(int argc, char ** argv)
             //wcc
             return 0;
         }, nullptr, 0, 1
-        // [&](std::pair<VertexId,VertexId> source_vid_range)
-        // {
-        //     for(int i = 0; i < PRO_NUM; i++)
-        //         pagerank[i].lock(source_vid_range.first, source_vid_range.second);
-        // },
-        // [&](std::pair<VertexId,VertexId> source_vid_range)
-        // {
-        //     for(int i = 0; i < PRO_NUM; i++)
-        //         pagerank[i].unlock(source_vid_range.first, source_vid_range.second);
-        // }
         );
     }
     double end_time = get_time();

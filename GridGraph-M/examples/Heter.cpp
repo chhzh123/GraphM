@@ -32,21 +32,22 @@ int main(int argc, char ** argv)
     BigVector<float> pagerank[PRO_NUM];
     BigVector<float> sum[PRO_NUM];
     BigVector<VertexId> degree(graph.path+"/degree", graph.vertices);
+    degree.fill(0);
 
     long vertex_data_bytes = (long)graph.vertices * ( sizeof(VertexId)+ sizeof(float) + sizeof(float));
     graph.set_vertex_data_bytes(vertex_data_bytes);
-    degree.fill(0);
+    printf("Vertices: %d Edges: %ld\n", graph.vertices, graph.edges);
 
     VertexId active_vertices = 8;
     //sssp
     Bitmap * active_in_sssp[PRO_NUM];
     Bitmap * active_out_sssp[PRO_NUM];
-    BigVector<VertexId> parent[PRO_NUM];
+    BigVector<VertexId> depth[PRO_NUM];
 
     //bfs
     Bitmap * active_in_bfs[PRO_NUM];
     Bitmap * active_out_bfs[PRO_NUM];
-    BigVector<VertexId> depth[PRO_NUM];
+    BigVector<VertexId> parent[PRO_NUM];
 
     //wcc
     Bitmap * active_in_wcc[PRO_NUM];
@@ -63,21 +64,25 @@ int main(int argc, char ** argv)
         depth[i].init(graph.path+"/depth"+std::to_string(i), graph.vertices);
         active_out_sssp[i]->clear();
         int start_sssp = 101 * (i+1) + 1;
+        if (start_sssp >= graph.vertices)
+            start_sssp = (i + 1) * 2;
         active_out_sssp[i]->set_bit(start_sssp);
         depth[i].fill(MAX_DEPTH);
         depth[i][start_sssp] = 0;
-        active_out_sssp[i]->fill();
+        // active_out_sssp[i]->fill();
 
         active_in_bfs[i] = graph.alloc_bitmap();
         active_out_bfs[i] = graph.alloc_bitmap();
         parent[i].init(graph.path+"/parent"+std::to_string(i), graph.vertices);
         //graph.set_vertex_data_bytes( graph.vertices * sizeof(VertexId) );
         int start_bfs = 71 * (i+1) + 2;
+        if (start_bfs >= graph.vertices)
+            start_bfs = i + 1;
         active_out_bfs[i]->clear();
         active_out_bfs[i]->set_bit(start_bfs);
         parent[i].fill(-1);
         parent[i][start_bfs] = start_bfs;
-        active_out_bfs[i]->fill();
+        // active_out_bfs[i]->fill();
 
         active_in_wcc[i] = graph.alloc_bitmap();
         active_out_wcc[i] = graph.alloc_bitmap();
@@ -102,7 +107,8 @@ int main(int argc, char ** argv)
     printf("degree calculation used %.2f seconds\n", get_time() - begin_time);
     fflush(stdout);
 
-    graph.hint(pagerank[0], sum[0]);
+    for (int i = 0; i < PRO_NUM; ++i)
+        graph.hint(pagerank[i], sum[i]);
     graph.stream_vertices<VertexId>(
         [&](VertexId i)
     {
@@ -137,23 +143,24 @@ int main(int argc, char ** argv)
     graph.get_should_access_shard(graph.should_access_shard_pagerank, nullptr);
     for (int iter=0; iter<iterations || active_vertices!=0; iter++){
         printf("%7d: %d\n", iter, active_vertices);
-        graph.hint(parent[0]);
+        for (int i = 0; i < PRO_NUM; ++i)
+            graph.hint(parent[i]);
 
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_sssp);
             graph.clear_should_access_shard(graph.should_access_shard_bfs);
             graph.clear_should_access_shard(graph.should_access_shard_wcc);
 
-            std::swap(active_in_sssp[0], active_out_sssp[0]);
-            active_out_sssp[0]->clear();
-            graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[0]);
-
-            std::swap(active_in_bfs[0], active_out_bfs[0]);
-            active_out_bfs[0]->clear();
-            graph.get_should_access_shard(graph.should_access_shard_bfs, active_in_bfs[0]);
-
             #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
-            for(int i = 0; i < PRO_NUM; i++){
+            for (int i = 0; i < PRO_NUM; ++i){
+                std::swap(active_in_sssp[i], active_out_sssp[i]);
+                active_out_sssp[i]->clear();
+                graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[i]);
+
+                std::swap(active_in_bfs[i], active_out_bfs[i]);
+                active_out_bfs[i]->clear();
+                graph.get_should_access_shard(graph.should_access_shard_bfs, active_in_bfs[i]);
+
                 std::swap(active_in_wcc[i], active_out_wcc[i]);
                 active_out_wcc[i]->clear();
                 graph.get_should_access_shard(graph.should_access_shard_wcc, active_in_wcc[i]);
@@ -172,13 +179,16 @@ int main(int argc, char ** argv)
         }, [&](Edge & e){
             //SSSP
             int return_state = 0;
-            if(active_in_sssp[0] -> get_bit(e.source)){
-                for(int i = 0; i < PRO_NUM; i++){
+            for(int i = 0; i < PRO_NUM; i++){
+                if (active_in_sssp[i]->get_bit(e.source))
+                {
                     int r = depth[i][e.target];
-                    int n = depth[i][e.source]+ e.weight;
-                    if(n < r){
-                        if (cas(&depth[i][e.target], r, n)){
-                            active_out_sssp[0]->set_bit(e.target);
+                    int n = depth[i][e.source] + e.weight;
+                    if (n < r)
+                    {
+                        if (cas(&depth[i][e.target], r, n))
+                        {
+                            active_out_sssp[i]->set_bit(e.target);
                             return_state = 1;
                         }
                     }
@@ -188,11 +198,14 @@ int main(int argc, char ** argv)
         },[&](Edge & e){
             //bfs
             int return_state = 0;
-            if(active_in_bfs[0] ->get_bit(e.source)){
-                for(int i = 0; i < PRO_NUM; i++){
-                    if (parent[i][e.target]==-1){
-                        if (cas(&parent[i][e.target], -1, e.source)){
-                            active_out_bfs[0]->set_bit(e.target);
+            for(int i = 0; i < PRO_NUM; i++){
+                if (active_in_bfs[i]->get_bit(e.source))
+                {
+                    if (parent[i][e.target] == -1)
+                    {
+                        if (cas(&parent[i][e.target], -1, e.source))
+                        {
+                            active_out_bfs[i]->set_bit(e.target);
                             return_state = 1;
                         }
                     }
@@ -226,7 +239,8 @@ int main(int argc, char ** argv)
         // }
         );
 
-        graph.hint(pagerank[0], sum[0]);
+        for (int i = 0; i < PRO_NUM; ++i)
+            graph.hint(pagerank[i], sum[i]);
         if (iter==iterations-1)
         {
             graph.stream_vertices<VertexId>(

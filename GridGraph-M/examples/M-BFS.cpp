@@ -115,16 +115,6 @@ int main(int argc, char ** argv)
             //wcc
             return 0;
         }, nullptr, 0, 1
-        // [&](std::pair<VertexId,VertexId> source_vid_range)
-        // {
-        //     for(int i = 0; i < PRO_NUM; i++)
-        //         pagerank[i].lock(source_vid_range.first, source_vid_range.second);
-        // },
-        // [&](std::pair<VertexId,VertexId> source_vid_range)
-        // {
-        //     for(int i = 0; i < PRO_NUM; i++)
-        //         pagerank[i].unlock(source_vid_range.first, source_vid_range.second);
-        // }
         );
     }
     double end_time = get_time();

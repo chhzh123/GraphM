@@ -237,5 +237,5 @@ int main(int argc, char ** argv)
     }
     double end_time = get_time();
 
-    printf("%d iterations of concurrent jobs (heter) took %.2f seconds\n", iterations, end_time - begin_time);
+    printf("%d iterations of concurrent jobs (homo2) took %.2f seconds\n", iterations, end_time - begin_time);
 }
