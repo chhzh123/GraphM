@@ -21,6 +21,7 @@ int main(int argc, char ** argv)
     long memory_bytes = (argc>=8)?atol(argv[7])*1024l*1024l*1024l:8l*1024l*1024l*1024l;
 
     int parallelism = std::thread::hardware_concurrency();
+    printf("parallelism: %d\n",parallelism);
     if(parallelism>PRO_NUM)
         parallelism=PRO_NUM;
 
@@ -211,17 +212,17 @@ int main(int argc, char ** argv)
                 }
             }
             return return_state;
-        }, nullptr, 0, 1,
-        [&](std::pair<VertexId,VertexId> source_vid_range)
-        {
-            for(int i = 0; i < PRO_NUM; i++)
-                pagerank[i].lock(source_vid_range.first, source_vid_range.second);
-        },
-        [&](std::pair<VertexId,VertexId> source_vid_range)
-        {
-            for(int i = 0; i < PRO_NUM; i++)
-                pagerank[i].unlock(source_vid_range.first, source_vid_range.second);
-        }
+        }, nullptr, 0, 1
+        // [&](std::pair<VertexId,VertexId> source_vid_range)
+        // {
+        //     for(int i = 0; i < PRO_NUM; i++)
+        //         pagerank[i].lock(source_vid_range.first, source_vid_range.second);
+        // },
+        // [&](std::pair<VertexId,VertexId> source_vid_range)
+        // {
+        //     for(int i = 0; i < PRO_NUM; i++)
+        //         pagerank[i].unlock(source_vid_range.first, source_vid_range.second);
+        // }
         );
 
         graph.hint(pagerank[0], sum[0]);
