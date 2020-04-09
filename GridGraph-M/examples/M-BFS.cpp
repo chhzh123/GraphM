@@ -1,7 +1,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include "core/graph.hpp"
-#include <vector>
 
 #define MAX_DEPTH 100000000
 
@@ -53,7 +52,7 @@ int main(int argc, char ** argv)
         active_out_bfs[i]->set_bit(start_bfs);
         parent[i].fill(-1);
         parent[i][start_bfs] = start_bfs;
-        // active_out_bfs[i]->fill();
+        // active_out_bfs[i]->fill(); // ?
     }
     #pragma omp barrier
 
@@ -63,6 +62,12 @@ int main(int argc, char ** argv)
 
     for (int iter = 0; active_vertices != 0; iter++)
     {
+        /* The active_vertices is NOT the precise value here.
+         * Consider edge 1->2 (BFS1), 3->2 (BFS2), where
+         * in one iteration, vertex 2 will be updated by different jobs
+         * and will be activated twice.
+         * Actually it is just recounted, but the final result is correct.
+         */
         printf("%7d: %d\n", iter, active_vertices);
         for (int i = 0; i < PRO_NUM; i++)
             graph.hint(parent[i]);
@@ -99,12 +104,7 @@ int main(int argc, char ** argv)
                     if (parent[i][e.target]==-1){
                         if (cas(&parent[i][e.target], -1, e.source)){
                             active_out_bfs[i]->set_bit(e.target);
-                            bool flag = false;
-                            for (int j = 0; j < PRO_NUM; j++)
-                                if (i != j && active_out_bfs[j]->get_bit(e.target))
-                                    flag = true;
-                            if (!flag)
-                                return_state = 1;
+                            return_state = 1;
                         }
                     }
                 }
