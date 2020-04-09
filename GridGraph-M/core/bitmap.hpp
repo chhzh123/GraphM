@@ -1,6 +1,9 @@
 #ifndef BITMAP_H
 #define BITMAP_H
 
+#include <math.h>
+#include <vector>
+
 #define WORD_OFFSET(i) (i >> 6)
 #define BIT_OFFSET(i) (i & 0x3f)
 
@@ -44,6 +47,25 @@ public:
 	}
 	void set_bit(size_t i) {
 		__sync_fetch_and_or(data+WORD_OFFSET(i), 1ul<<BIT_OFFSET(i));
+	}
+	void print(int x=2){
+		int cnt = 0;
+		bool flag = false;
+		size_t bm_size = WORD_OFFSET(size);
+		std::vector<int> res;
+		for (size_t i = 0; i <= size; i++)
+		{
+			if(this->get_bit(i)){
+				if (cnt < x)
+					res.push_back(i);
+				cnt++;
+			}
+		}
+		printf("D (%d):",cnt);
+		for (int i = 0; i < int(fmin(x,res.size())); ++i)
+			if (res[i] != -1)
+				printf("%d ",res[i]);
+		printf("\n");
 	}
 };
 
