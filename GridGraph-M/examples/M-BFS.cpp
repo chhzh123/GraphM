@@ -75,11 +75,13 @@ int main(int argc, char ** argv)
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_bfs);
 
+            #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
             for (int i = 0; i < PRO_NUM; ++i){
                 std::swap(active_in_bfs[i], active_out_bfs[i]);
                 active_out_bfs[i]->clear();
                 graph.get_should_access_shard(graph.should_access_shard_bfs, active_in_bfs[i]);
             }
+            #pragma omp barrier
         }
 
 #ifdef DEBUG
@@ -87,7 +89,6 @@ int main(int argc, char ** argv)
             active_in_bfs[i]->print(10);
 #endif
 
-        std::vector<Edge> edges;
         graph.get_global_should_access_shard(graph.should_access_shard_wcc, graph.should_access_shard_pagerank,
                                              graph.should_access_shard_bfs,graph.should_access_shard_sssp);
         active_vertices = graph.stream_edges<VertexId>([&](Edge & e){

@@ -30,11 +30,12 @@ int main(int argc, char ** argv)
     double begin_time = get_time();
     Graph graph(path);
     graph.set_memory_bytes(memory_bytes);
+    printf("Vertices: %d Edges: %ld\n", graph.vertices, graph.edges);
 
     long vertex_data_bytes = (long)graph.vertices * ( sizeof(VertexId)+ sizeof(float) + sizeof(float));
     graph.set_vertex_data_bytes(vertex_data_bytes);
 
-    VertexId active_vertices = 4;
+    VertexId active_vertices = graph.vertices;
 
     //bfs
     Bitmap * active_in_bfs[PRO_NUM];
@@ -58,7 +59,7 @@ int main(int argc, char ** argv)
         active_out_bfs[i]->set_bit(start_bfs);
         parent[i].fill(-1);
         parent[i][start_bfs] = start_bfs;
-        active_out_bfs[i]->fill();
+        // active_out_bfs[i]->fill();
 
         active_in_wcc[i] = graph.alloc_bitmap();
         active_out_wcc[i] = graph.alloc_bitmap();
@@ -91,18 +92,19 @@ int main(int argc, char ** argv)
 
     for (int iter=0; active_vertices!=0; iter++){
         printf("%7d: %d\n", iter, active_vertices);
-        graph.hint(parent[0]);
+        for (int i = 0; i < PRO_NUM; i++)
+            graph.hint(parent[i]);
 
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_bfs);
             graph.clear_should_access_shard(graph.should_access_shard_wcc);
 
-            std::swap(active_in_bfs[0], active_out_bfs[0]);
-            active_out_bfs[0]->clear();
-            graph.get_should_access_shard(graph.should_access_shard_bfs, active_in_bfs[0]);
-
             #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
             for(int i = 0; i < PRO_NUM; i++){
+                std::swap(active_in_bfs[i], active_out_bfs[i]);
+                active_out_bfs[i]->clear();
+                graph.get_should_access_shard(graph.should_access_shard_bfs, active_in_bfs[i]);
+
                 std::swap(active_in_wcc[i], active_out_wcc[i]);
                 active_out_wcc[i]->clear();
                 graph.get_should_access_shard(graph.should_access_shard_wcc, active_in_wcc[i]);
@@ -121,11 +123,14 @@ int main(int argc, char ** argv)
         },[&](Edge & e){
             //bfs
             int return_state = 0;
-            if(active_in_bfs[0] ->get_bit(e.source)){
-                for(int i = 0; i < PRO_NUM; i++){
-                    if (parent[i][e.target]==-1){
-                        if (cas(&parent[i][e.target], -1, e.source)){
-                            active_out_bfs[0]->set_bit(e.target);
+            for(int i = 0; i < PRO_NUM; i++){
+                if (active_in_bfs[i]->get_bit(e.source))
+                {
+                    if (parent[i][e.target] == -1)
+                    {
+                        if (cas(&parent[i][e.target], -1, e.source))
+                        {
+                            active_out_bfs[i]->set_bit(e.target);
                             return_state = 1;
                         }
                     }
