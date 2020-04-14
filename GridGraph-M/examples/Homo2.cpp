@@ -237,5 +237,9 @@ int main(int argc, char ** argv)
     }
     double end_time = get_time();
 
+    for(int j = 0; j < PRO_NUM; ++j){
+        printf("Len: %d\n",depth[j][0]);
+    }
+
     printf("%d iterations of concurrent jobs (homo2) took %.2f seconds\n", iterations, end_time - begin_time);
 }

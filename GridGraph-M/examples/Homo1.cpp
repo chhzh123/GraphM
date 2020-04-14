@@ -157,5 +157,19 @@ int main(int argc, char ** argv)
     }
     double end_time = get_time();
 
+    #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
+    for (int j = 0; j < PRO_NUM; ++j){
+        BigVector<VertexId> label_stat(graph.path + "/label_stat", graph.vertices);
+        label_stat.fill(0);
+        graph.stream_vertices<VertexId>([&](VertexId i) {
+            write_add(&label_stat[label[j][i]], 1);
+            return 1;
+        });
+        VertexId components = graph.stream_vertices<VertexId>([&](VertexId i) {
+            return label_stat[i] != 0;
+        });
+        printf("CC: %d\n",components);
+    }
+
     printf("%d iterations of concurrent jobs (homo1) took %.2f seconds\n", iterations, end_time - begin_time);
 }
