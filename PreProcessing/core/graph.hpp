@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
+#include <cmath>
 #include <unistd.h>
 #include <malloc.h>
 #include <omp.h>

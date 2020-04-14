@@ -1,7 +1,7 @@
 #ifndef BITMAP_H
 #define BITMAP_H
 
-#include <math.h>
+#include <cmath>
 #include <vector>
 
 #define WORD_OFFSET(i) (i >> 6)
