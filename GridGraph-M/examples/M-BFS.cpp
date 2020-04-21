@@ -20,7 +20,7 @@ int main(int argc, char ** argv)
     long graph_size = atol(argv[5])*1024l*1024l;
     long memory_bytes = (argc>=7)?atol(argv[6])*1024l*1024l*1024l:8l*1024l*1024l*1024l;
 
-    int parallelism = std::thread::hardware_concurrency();
+    int parallelism = (argc>=8) ? atol(argv[7]) : std::thread::hardware_concurrency();
     printf("parallelism: %d\n",parallelism);
     if(parallelism>PRO_NUM)
         parallelism=PRO_NUM;
