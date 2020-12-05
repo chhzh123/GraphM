@@ -27,8 +27,8 @@ int main(int argc, char ** argv)
     //     parallelism=PRO_NUM;
     int parallelism = PRO_NUM;
     float arrival_time[8] = {0};
-    for (int i = 0; i < 8; ++i)
-        arrival_time[i] = i*0.5;
+    for (int i = 1; i < 8; ++i)
+        arrival_time[i] = atof(argv[6+i]);
 
     double begin_time = get_time();
     Graph graph(path);
@@ -60,6 +60,7 @@ int main(int argc, char ** argv)
         // active_out_bfs[i]->fill(); // ?
     }
     #pragma omp barrier
+    double start_time = get_time();
 
     graph.set_sizeof_blocks(cache_size, graph_size, vertex_data_bytes*4*PRO_NUM);
 
@@ -74,13 +75,13 @@ int main(int argc, char ** argv)
          * Actually it is just recounted, but the final result is correct.
          */
         for (int i = curr_job_num; i < PRO_NUM; ++i) {// dynamically add jobs
-            if ((double)arrival_time[i] < (double)(get_time() - begin_time)) {
+            if ((double)arrival_time[i] < (double)(get_time() - start_time)) {
                 curr_job_num++;
                 active_vertices += 1; // remember!
-                printf("Add job %d at %f (Iter: %d)\n", curr_job_num, (double)(get_time() - begin_time), iter);
+                printf("Add job %d at %f (Iter: %d)\n", curr_job_num, (double)(get_time() - start_time), iter);
             }
         }
-        printf("%7d (%d): %d\n", iter, curr_job_num, active_vertices);
+        // printf("%7d (%d): %d\n", iter, curr_job_num, active_vertices);
         parallelism = curr_job_num;
         for (int i = 0; i < curr_job_num; i++) {
             graph.hint(parent[i]);

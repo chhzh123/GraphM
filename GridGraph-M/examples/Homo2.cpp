@@ -32,8 +32,8 @@ int main(int argc, char ** argv)
     //     parallelism=PRO_NUM;
     int parallelism = PRO_NUM;
     float arrival_time[8] = {0};
-    for (int i = 0; i < 8; ++i)
-        arrival_time[i] = i;
+    for (int i = 1; i < 8; ++i)
+        arrival_time[i] = atof(argv[6+i]);
 
     double begin_time = get_time();
     Graph graph(path);
@@ -72,6 +72,7 @@ int main(int argc, char ** argv)
         // active_out_sssp[i]->fill();
     }
     #pragma omp barrier
+    double start_time = get_time();
 
     graph.set_sizeof_blocks(cache_size, graph_size, vertex_data_bytes*4*PRO_NUM);
 
@@ -122,7 +123,7 @@ int main(int argc, char ** argv)
     int iter_pr = 1000000; // a large number
     for (int iter=0; iter < iter_pr+iterations || active_vertices!=0 || curr_job_num < TOT_NUM; iter++){
         for (int i = curr_job_num; i < TOT_NUM; ++i) {// dynamically add jobs
-            if ((double)arrival_time[i] < (double)(get_time() - begin_time)) {
+            if ((double)arrival_time[i] < (double)(get_time() - start_time)) {
                 curr_job_num++;
                 if (curr_job_num > 4)
                     curr_pr++;
@@ -130,10 +131,10 @@ int main(int argc, char ** argv)
                     curr_sssp++;
                 // first add SSSP, later PageRank
                 active_vertices = (curr_job_num >= 4 ? graph.vertices : 1 + active_vertices); // remember!
-                printf("Add job %d at %f (Iter: %d)\n", curr_job_num, (double)(get_time() - begin_time), iter);
+                printf("Add job %d at %f (Iter: %d)\n", curr_job_num, (double)(get_time() - start_time), iter);
             }
         }
-        printf("%7d (%d): %d\n", iter, curr_job_num, active_vertices);
+        // printf("%7d (%d): %d\n", iter, curr_job_num, active_vertices);
         parallelism = curr_job_num;
 
         if(active_vertices!=0){
