@@ -16,16 +16,24 @@ int main(int argc, char ** argv)
     }
     std::string path = argv[1];
     int PRO_NUM = atoi(argv[2]);
+    int TOT_NUM = 8;
+    int curr_job_num = 1;
+    int curr_sssp = 1;
+    int curr_pr = 0;
     int iterations = atoi(argv[3]);
     // VertexId start_vid = atoi(argv[4]);
     long cache_size = atol(argv[4])*1024l*1024l;
     long graph_size = atol(argv[5])*1024l*1024l;
     long memory_bytes = (argc>=7)?atol(argv[6])*1024l*1024l*1024l:8l*1024l*1024l*1024l;
 
-    int parallelism = std::thread::hardware_concurrency();
-    printf("parallelism: %d\n",parallelism);
-    if(parallelism>PRO_NUM)
-        parallelism=PRO_NUM;
+    // int parallelism = std::thread::hardware_concurrency();
+    // printf("parallelism: %d\n",parallelism);
+    // if(parallelism>PRO_NUM)
+    //     parallelism=PRO_NUM;
+    int parallelism = PRO_NUM;
+    float arrival_time[8] = {0};
+    for (int i = 0; i < 8; ++i)
+        arrival_time[i] = i;
 
     double begin_time = get_time();
     Graph graph(path);
@@ -40,7 +48,7 @@ int main(int argc, char ** argv)
     graph.set_vertex_data_bytes(vertex_data_bytes);
     printf("Vertices: %d Edges: %ld\n", graph.vertices, graph.edges);
 
-    VertexId active_vertices = 4;
+    VertexId active_vertices = 1;
     //sssp
     Bitmap * active_in_sssp[PRO_NUM];
     Bitmap * active_out_sssp[PRO_NUM];
@@ -110,22 +118,42 @@ int main(int argc, char ** argv)
     }
     );
 
-
-    graph.get_should_access_shard(graph.should_access_shard_pagerank, nullptr);
-    for (int iter=0; iter<iterations || active_vertices!=0; iter++){
-        printf("%7d: %d\n", iter, active_vertices);
+    bool flag = false;
+    int iter_pr = 1000000; // a large number
+    for (int iter=0; iter < iter_pr+iterations || active_vertices!=0 || curr_job_num < TOT_NUM; iter++){
+        for (int i = curr_job_num; i < TOT_NUM; ++i) {// dynamically add jobs
+            if ((double)arrival_time[i] < (double)(get_time() - begin_time)) {
+                curr_job_num++;
+                if (curr_job_num > 4)
+                    curr_pr++;
+                else
+                    curr_sssp++;
+                // first add SSSP, later PageRank
+                active_vertices = (curr_job_num >= 4 ? graph.vertices : 1 + active_vertices); // remember!
+                printf("Add job %d at %f (Iter: %d)\n", curr_job_num, (double)(get_time() - begin_time), iter);
+            }
+        }
+        printf("%7d (%d): %d\n", iter, curr_job_num, active_vertices);
+        parallelism = curr_job_num;
 
         if(active_vertices!=0){
             graph.clear_should_access_shard(graph.should_access_shard_sssp);
 
+            parallelism = curr_sssp;
             #pragma omp parallel for schedule(dynamic) num_threads(parallelism)
-            for (int i = 0; i < PRO_NUM; ++i){
+            for (int i = 0; i < curr_sssp; ++i){
                 std::swap(active_in_sssp[i], active_out_sssp[i]);
                 active_out_sssp[i]->clear();
                 graph.get_should_access_shard(graph.should_access_shard_sssp, active_in_sssp[i]);
             }
-
             #pragma omp barrier
+            if (curr_job_num > 4)
+                graph.get_should_access_shard(graph.should_access_shard_pagerank, nullptr);
+            if (curr_pr == 4 && !flag) {
+                flag = true;
+                iter_pr = iter;
+                printf("final iter: %d/%d",iter_pr,iter_pr+iterations);
+            }
         }
 
 #ifdef DEBUG
@@ -137,14 +165,14 @@ int main(int argc, char ** argv)
                                              graph.should_access_shard_bfs,graph.should_access_shard_sssp);
         active_vertices = graph.stream_edges<VertexId>([&](Edge & e){
             //pagerank
-            for(int i = 0; i < PRO_NUM; i++){
+            for(int i = 0; i < curr_pr; i++){
                 write_add(&sum[i][e.target], pagerank[i][e.source]);
             }
             return 0;
         }, [&](Edge & e){
             //SSSP
             int return_state = 0;
-            for(int i = 0; i < PRO_NUM; i++){
+            for(int i = 0; i < curr_sssp; i++){
                 if (active_in_sssp[i]->get_bit(e.source))
                 {
                     int r = depth[i][e.target];
@@ -179,28 +207,28 @@ int main(int argc, char ** argv)
         // }
         );
 
-        for (int i = 0; i < PRO_NUM; ++i)
+        for (int i = 0; i < curr_pr; ++i)
             graph.hint(pagerank[i], sum[i]);
         if (iter==iterations-1)
         {
             graph.stream_vertices<VertexId>(
                 [&](VertexId i)
             {
-                for(int j = 0; j < PRO_NUM; j++){
+                for(int j = 0; j < curr_pr; j++){
                     pagerank[j][i] = 0.15f + 0.85f * sum[j][i];
                 }
                 return 0;
             }, nullptr, 0,
             [&](std::pair<VertexId,VertexId> vid_range)
             {
-                for(int j = 0; j < PRO_NUM; j++)
+                for(int j = 0; j < curr_pr; j++)
                 {
                     pagerank[j].load(vid_range.first, vid_range.second);
                 }
             },
             [&](std::pair<VertexId,VertexId> vid_range)
             {
-                for(int j = 0; j < PRO_NUM; j++)
+                for(int j = 0; j < curr_pr; j++)
                 {
                     pagerank[j].save();
                 }
@@ -212,7 +240,7 @@ int main(int argc, char ** argv)
             graph.stream_vertices<float>(
                 [&](VertexId i)
             {
-                for(int j = 0; j < PRO_NUM; j++){
+                for(int j = 0; j < curr_pr; j++){
                     pagerank[j][i] = (0.15f + 0.85f * sum[j][i]) / degree[i];
                     sum[j][i] = 0;
                 }
@@ -220,14 +248,14 @@ int main(int argc, char ** argv)
             }, nullptr, 0,
             [&](std::pair<VertexId,VertexId> vid_range)
             {
-                for(int j = 0; j < PRO_NUM; j++){
+                for(int j = 0; j < curr_pr; j++){
                     pagerank[j].load(vid_range.first, vid_range.second);
                     sum[j].load(vid_range.first, vid_range.second);
                 }
             },
             [&](std::pair<VertexId,VertexId> vid_range)
             {
-                for(int j = 0; j < PRO_NUM; j++){
+                for(int j = 0; j < curr_pr; j++){
                     pagerank[j].save();
                     sum[j].save();
                 }
@@ -237,7 +265,7 @@ int main(int argc, char ** argv)
     }
     double end_time = get_time();
 
-    for(int j = 0; j < PRO_NUM; ++j){
+    for(int j = 0; j < curr_sssp; ++j){
         printf("Len: %d\n",depth[j][0]);
     }
 
